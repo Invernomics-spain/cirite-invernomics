@@ -270,6 +270,8 @@ input::placeholder{color:var(--text3);font-family:var(--sans);font-size:12px;}
 
 <script>
 const RAILWAY_URL = 'https://itw-invernomics-production.up.railway.app';
+// Origen fijo del analizador (iframe parserFrame): los mensajes con datos de clientes solo van ahí
+const PARSER_ORIGIN = 'https://cirite-invernomics.pages.dev';
 // Sin claves en la página: el servidor valida el token de la sesión de Bitrix24 (BX24.getAuth()).
 const MSG_SOLO_BITRIX = 'Para enviar o descargar del Banco de España abre esta app desde la negociación en Bitrix24.';
 
@@ -283,9 +285,13 @@ function getBx24Auth() {
 
 function refreshBx24Auth() {
   return new Promise(function(resolve) {
+    let hecho = false;
+    const fin = function(v) { if (!hecho) { hecho = true; clearTimeout(t); resolve(v); } };
+    // Si Bitrix24 no responde en 10 s, no dejar la página esperando para siempre
+    const t = setTimeout(function() { fin(null); }, 10000);
     try {
-      BX24.refreshAuth(function(a) { resolve((a && a.access_token && a.domain) ? a : getBx24Auth()); });
-    } catch (e) { resolve(null); }
+      BX24.refreshAuth(function(a) { fin((a && a.access_token && a.domain) ? a : getBx24Auth()); });
+    } catch (e) { fin(null); }
   });
 }
 
@@ -679,7 +685,7 @@ async function downloadAndAnalyze(identifier, proceso) {
     const frame = document.getElementById('parserFrame');
     const nombres = (loadedTitulares||[]).map(t=>({nombre:(t.nombre||'').trim(), dni:(t.dni||'').trim().toUpperCase()}));
     try { localStorage.setItem('_cirbeNombres', JSON.stringify(nombres)); } catch(e){}
-    frame.contentWindow.postMessage({ type: 'LOAD_CIRBE', buffer: buffer, fileName: data.fileName, nombres: nombres }, '*', [buffer]);
+    frame.contentWindow.postMessage({ type: 'LOAD_CIRBE', buffer: buffer, fileName: data.fileName, nombres: nombres }, PARSER_ORIGIN, [buffer]);
     status.textContent = '✓ Analizando ' + escapeHtml(data.fileName || identifier);
     filesDiv.style.display = 'none';
   } catch (err) {
@@ -690,9 +696,10 @@ async function downloadAndAnalyze(identifier, proceso) {
 window.addEventListener('message', function(e) {
   if (e.data && e.data.type === 'REQUEST_NOMBRES') {
     const frame = document.getElementById('parserFrame');
-    if (frame && frame.contentWindow) {
+    // Solo atender al iframe del analizador, no a otras ventanas
+    if (frame && frame.contentWindow && e.source === frame.contentWindow) {
       const nombres = (loadedTitulares||[]).map(t=>({nombre:(t.nombre||'').trim(), dni:(t.dni||'').trim().toUpperCase()}));
-      frame.contentWindow.postMessage({ type: 'SET_NOMBRES', nombres: nombres }, '*');
+      frame.contentWindow.postMessage({ type: 'SET_NOMBRES', nombres: nombres }, PARSER_ORIGIN);
     }
   }
 });
