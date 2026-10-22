@@ -1,0 +1,16 @@
+# Dependabot (capa 1 del departamento de IT de Invernomics).
+# Las dependencias de la app solo reciben PR de **seguridad** (límite 0 = sin PR de
+# versiones normales); las acciones de GitHub se actualizan una vez por semana.
+# Para que lleguen los PR de seguridad hay que tener activado en el repo:
+# Settings → Code security → Dependabot alerts y Dependabot security updates.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Madrid
+    groups:
+      acciones:
+        patterns: ["*"]
