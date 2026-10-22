@@ -682,6 +682,8 @@ function getNombreByNIF(nif, fallbackIdx){
 }
 
 window.addEventListener('message',function(e){
+  // Solo aceptar mensajes de la página que nos incrusta (index.html)
+  if(e.source!==window.parent)return;
   if(e.data&&e.data.type==='SET_NOMBRES'&&Array.isArray(e.data.nombres)){
     window._nombres=e.data.nombres;
     console.log('[CIRBE] SET_NOMBRES:',JSON.stringify(window._nombres));

@@ -270,7 +270,56 @@ input::placeholder{color:var(--text3);font-family:var(--sans);font-size:12px;}
 
 <script>
 const RAILWAY_URL = 'https://itw-invernomics-production.up.railway.app';
-const RAILWAY_API_KEY = 'Invernomics2024BdE!';
+// Origen fijo del analizador (iframe parserFrame): los mensajes con datos de clientes solo van ahí
+const PARSER_ORIGIN = 'https://cirite-invernomics.pages.dev';
+// Sin claves en la página: el servidor valida el token de la sesión de Bitrix24 (BX24.getAuth()).
+const MSG_SOLO_BITRIX = 'Para enviar o descargar del Banco de España abre esta app desde la negociación en Bitrix24.';
+
+function getBx24Auth() {
+  if (typeof BX24 === 'undefined' || typeof BX24.getAuth !== 'function') return null;
+  try {
+    const a = BX24.getAuth();
+    return (a && a.access_token && a.domain) ? a : null;
+  } catch (e) { return null; }
+}
+
+function refreshBx24Auth() {
+  return new Promise(function(resolve) {
+    let hecho = false;
+    const fin = function(v) { if (!hecho) { hecho = true; clearTimeout(t); resolve(v); } };
+    // Si Bitrix24 no responde en 10 s, no dejar la página esperando para siempre
+    const t = setTimeout(function() { fin(null); }, 10000);
+    try {
+      BX24.refreshAuth(function(a) { fin((a && a.access_token && a.domain) ? a : getBx24Auth()); });
+    } catch (e) { fin(null); }
+  });
+}
+
+// Todas las llamadas al servidor pasan por aquí
+async function serverFetch(path, options) {
+  options = options || {};
+  let auth = getBx24Auth();
+  if (!auth) {
+    showBanner(MSG_SOLO_BITRIX, 'warn');
+    throw new Error(MSG_SOLO_BITRIX);
+  }
+  const doFetch = function(a) {
+    const headers = Object.assign({}, options.headers || {}, {
+      'Authorization': 'Bearer ' + a.access_token,
+      'X-B24-Domain': a.domain,
+    });
+    return fetch(RAILWAY_URL + path, Object.assign({}, options, { headers: headers }));
+  };
+  let resp = await doFetch(auth);
+  if (resp.status === 401) {
+    auth = await refreshBx24Auth();
+    if (auth) resp = await doFetch(auth);
+    if (!auth || resp.status === 401) throw new Error('Sesión de Bitrix24 caducada o sin permiso. Recarga la negociación.');
+  }
+  if (resp.status === 403) throw new Error('Tu usuario no tiene permiso para usar CIRITE.');
+  return resp;
+}
+
 const FIELDS = {
   titular1:{nombre:'UF_CRM_1746731416351',dni:'UF_CRM_1740250548521'},
   titular2:{nombre:'UF_CRM_1746733312400',dni:'UF_CRM_1746733431762'},
@@ -500,9 +549,9 @@ async function sendToBde(){
   btn.disabled=true; ldg.classList.add('show');
   res.className='send-result'; res.innerHTML='';
   try{
-    const resp=await fetch(RAILWAY_URL+'/enviar-cirite',{
+    const resp=await serverFetch('/enviar-cirite',{
       method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':RAILWAY_API_KEY},
+      headers:{'Content-Type':'application/json'},
       body:JSON.stringify({nombreFichero:generatedFilename,contenido:generatedContent,dealId,encoding:'iso-8859-1'}),
     });
     const data=await resp.json();
@@ -584,9 +633,7 @@ async function fetchFilesFromBde() {
 
   status.textContent = 'Buscando CIRBE para ' + dnis.join(', ') + '…';
   try {
-    const resp = await fetch(RAILWAY_URL + '/descargar-cirbe?dni=' + encodeURIComponent(dnis.join(',')), {
-      headers: { 'x-api-key': RAILWAY_API_KEY }
-    });
+    const resp = await serverFetch('/descargar-cirbe?dni=' + encodeURIComponent(dnis.join(',')));
     const data = await resp.json();
     if (!data.ok) throw new Error(data.error || 'Error desconocido');
     if (data.total === 0) {
@@ -626,9 +673,8 @@ async function downloadAndAnalyze(identifier, proceso) {
   const filesDiv = document.getElementById('cirbeFiles');
   status.textContent = 'Descargando fichero…';
   try {
-    const resp = await fetch(
-      RAILWAY_URL + '/descargar-cirbe?identifier=' + encodeURIComponent(identifier) + '&proceso=' + encodeURIComponent(proceso),
-      { headers: { 'x-api-key': RAILWAY_API_KEY } }
+    const resp = await serverFetch(
+      '/descargar-cirbe?identifier=' + encodeURIComponent(identifier) + '&proceso=' + encodeURIComponent(proceso)
     );
     const data = await resp.json();
     if (!data.ok) throw new Error(data.error || 'Error al descargar');
@@ -639,7 +685,7 @@ async function downloadAndAnalyze(identifier, proceso) {
     const frame = document.getElementById('parserFrame');
     const nombres = (loadedTitulares||[]).map(t=>({nombre:(t.nombre||'').trim(), dni:(t.dni||'').trim().toUpperCase()}));
     try { localStorage.setItem('_cirbeNombres', JSON.stringify(nombres)); } catch(e){}
-    frame.contentWindow.postMessage({ type: 'LOAD_CIRBE', buffer: buffer, fileName: data.fileName, nombres: nombres }, '*', [buffer]);
+    frame.contentWindow.postMessage({ type: 'LOAD_CIRBE', buffer: buffer, fileName: data.fileName, nombres: nombres }, PARSER_ORIGIN, [buffer]);
     status.textContent = '✓ Analizando ' + escapeHtml(data.fileName || identifier);
     filesDiv.style.display = 'none';
   } catch (err) {
@@ -650,9 +696,10 @@ async function downloadAndAnalyze(identifier, proceso) {
 window.addEventListener('message', function(e) {
   if (e.data && e.data.type === 'REQUEST_NOMBRES') {
     const frame = document.getElementById('parserFrame');
-    if (frame && frame.contentWindow) {
+    // Solo atender al iframe del analizador, no a otras ventanas
+    if (frame && frame.contentWindow && e.source === frame.contentWindow) {
       const nombres = (loadedTitulares||[]).map(t=>({nombre:(t.nombre||'').trim(), dni:(t.dni||'').trim().toUpperCase()}));
-      frame.contentWindow.postMessage({ type: 'SET_NOMBRES', nombres: nombres }, '*');
+      frame.contentWindow.postMessage({ type: 'SET_NOMBRES', nombres: nombres }, PARSER_ORIGIN);
     }
   }
 });
