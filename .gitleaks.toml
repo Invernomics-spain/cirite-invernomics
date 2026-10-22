@@ -1,0 +1,57 @@
+# Configuración del escáner de secretos (gitleaks).
+# Usa las reglas de serie de gitleaks y añade las claves propias de Invernomics.
+# La misma configuración se copia a todos los repos de la organización.
+
+title = "Invernomics"
+
+[extend]
+useDefault = true
+
+# Webhook entrante de Bitrix24: https://<portal>.bitrix24.<dominio>/rest/<usuario>/<clave>/
+[[rules]]
+id = "bitrix24-webhook"
+description = "Webhook de Bitrix24 con su clave"
+regex = '''https?://[a-z0-9.-]+\.bitrix24\.[a-z.]{2,6}/rest/\d+/[a-z0-9]{8,}'''
+keywords = ["bitrix24"]
+
+  [[rules.allowlists]]
+  description = "Ejemplos con la clave rellena de x"
+  regexTarget = "match"
+  regexes = ['''/rest/\d+/x+$''']
+
+# Webhook de Make: https://hook.<región>.make.com/<clave>
+[[rules]]
+id = "make-webhook"
+description = "Webhook de Make con su clave"
+regex = '''https://hook\.[a-z0-9]+\.make\.com/[a-z0-9]{20,}'''
+keywords = ["make.com"]
+
+  # Los formularios de las landings llaman a Make desde el navegador, así que su
+  # webhook es visible para cualquiera que abra la página: no se bloquea en .html.
+  # En código de servidor (.js, .ts) sí se bloquea: ahí debe ir en una variable.
+  [[rules.allowlists]]
+  description = "Formularios de landings"
+  paths = ['''\.html?$''']
+
+# Cadena de conexión a Postgres con contraseña (por ejemplo, la DATABASE_URL de Railway).
+[[rules]]
+id = "postgres-url-con-contrasena"
+description = "URL de Postgres con usuario y contraseña"
+regex = '''postgres(?:ql)?://[^:\s/'"]+:[^@\s'"]{6,}@[a-z0-9.-]+'''
+keywords = ["postgres"]
+
+  [[rules.allowlists]]
+  description = "Ejemplos y bases locales"
+  regexTarget = "match"
+  regexes = [
+    '''@(localhost|127\.0\.0\.1|postgres|db|host)\b''',
+    ''':(password|pass|contrasena|changeme|secret|postgres)@''',
+    '''\$\{''',
+  ]
+
+# Certificado digital en base64 pegado en el código (como CERT_BASE64 de itw-invernomics).
+[[rules]]
+id = "certificado-base64"
+description = "Certificado digital en base64"
+regex = '''CERT_BASE64\w*\s*[=:]\s*['"]?[A-Za-z0-9+/]{100,}'''
+keywords = ["cert_base64"]
